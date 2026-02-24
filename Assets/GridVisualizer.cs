@@ -61,12 +61,17 @@ public class GridVisualizer : MonoBehaviour
 
         if (!drawCells) return;
 
-        Gizmos.color = new Color(1f, 1f, 1f, 0.25f);
+        if (generator.DungeonGrid == null) return;
+
+        Gizmos.color = new Color(0f, 1f, 0f, 0.35f);
+
         for (int x = 0; x < w; x++)
-        for (int y = 0; y < h; y++)
-        {
-            Vector3 center = origin + new Vector3((x + 0.5f) * s, 0f, (y + 0.5f) * s);
-            Gizmos.DrawSphere(center, s * 0.05f);
-        }
+            for (int y = 0; y < h; y++)
+            {
+                if (generator.DungeonGrid.GetCell(x, y) == 0) continue;
+
+                Vector3 center = origin + new Vector3((x + 0.5f) * s, 0f, (y + 0.5f) * s);
+                Gizmos.DrawCube(center, new Vector3(s, 0.01f, s));
+            }
     }
 }
