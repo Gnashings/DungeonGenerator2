@@ -35,6 +35,11 @@ public class DungeonGenerator : MonoBehaviour
     [SerializeField] private Vector2Int roomSizeMin = new Vector2Int(5, 5);
     [SerializeField] private Vector2Int roomSizeMax = new Vector2Int(11, 11);
 
+    [Header("Room Placement Rules")]
+    [SerializeField] private bool allowRoomOverlap = true;
+    [SerializeField] private int maxAttemptsPerRoom = 50;
+    [SerializeField] private int overlapPadding = 0;
+
     [Header("Dungeon Seeding")]
     [SerializeField] private bool useSeed = false;
     [SerializeField] private int seed = 12345;
@@ -44,27 +49,49 @@ public class DungeonGenerator : MonoBehaviour
         roomCenters.Clear();
         DungeonGrid.Clear(0);
 
-        // Only instance of random for seed generation.
-        System.Random rng = useSeed ? new System.Random(seed) : new System.Random();
-
         if (!useSeed)
         {
             seed = UnityEngine.Random.Range(int.MinValue, int.MaxValue);
         }
 
+        // Only instance of random for seed generation.
+        System.Random rng = new System.Random(seed);
+
+        int placedRooms = 0;
+
         for (int i = 0; i < roomCount; i++)
         {
-            int cx = rng.Next(0, DungeonGrid.Width);
-            int cy = rng.Next(0, DungeonGrid.Height);
+            bool placed = false;
 
-            int rw = rng.Next(roomSizeMin.x, roomSizeMax.x + 1);
-            int rh = rng.Next(roomSizeMin.y, roomSizeMax.y + 1);
+            for (int attempt = 0; attempt < maxAttemptsPerRoom; attempt++)
+            {
+                int cx = rng.Next(0, DungeonGrid.Width);
+                int cy = rng.Next(0, DungeonGrid.Height);
 
-            CarveRoomCentered(cx, cy, rw, rh);
-            roomCenters.Add(new Vector2Int(cx, cy));
+                int rw = rng.Next(roomSizeMin.x, roomSizeMax.x + 1);
+                int rh = rng.Next(roomSizeMin.y, roomSizeMax.y + 1);
+
+                // Bounds used ONLY for overlap checking (includes padding)
+                GetRoomExtents(cx, cy, rw, rh, overlapPadding, out int x0, out int x1, out int y0, out int y1);
+
+                if (!allowRoomOverlap && !CanPlaceRoom(x0, x1, y0, y1))
+                    continue;
+
+                // Carve actual room without padding
+                CarveRoomCentered(cx, cy, rw, rh);
+                roomCenters.Add(new Vector2Int(cx, cy));
+
+                placed = true;
+                placedRooms++;
+                break;
+            }
+
+            // If it fails, skip it. This prevents infinite loops.
         }
 
-        ConnectRoomsMST();
+        if (roomCenters.Count >= 2)
+            ConnectRoomsMST();
+
     }
 
     private void CarveRoomCentered(int cx, int cy, int w, int h)
@@ -83,6 +110,32 @@ public class DungeonGenerator : MonoBehaviour
                 if (!DungeonGrid.InBounds(x, y)) continue;
                 DungeonGrid.Set(x, y, 1);
             }
+    }
+    private void GetRoomExtents(int cx, int cy, int w, int h, int padding, out int x0, out int x1, out int y0, out int y1)
+    {
+        int halfW = w / 2;
+        int halfH = h / 2;
+
+        x0 = cx - halfW - padding;
+        x1 = cx + halfW + padding;
+        y0 = cy - halfH - padding;
+        y1 = cy + halfH + padding;
+    }
+
+    private bool CanPlaceRoom(int x0, int x1, int y0, int y1)
+    {
+        // Reject if any part is out of bounds (keeps the room fully inside)
+        if (!DungeonGrid.InBounds(x0, y0)) return false;
+        if (!DungeonGrid.InBounds(x1, y1)) return false;
+
+        for (int x = x0; x <= x1; x++)
+            for (int y = y0; y <= y1; y++)
+            {
+                if (DungeonGrid.GetCell(x, y) != 0)
+                    return false;
+            }
+
+        return true;
     }
 
     // Prim implimentation

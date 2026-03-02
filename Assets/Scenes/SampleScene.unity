@@ -264,11 +264,14 @@ MonoBehaviour:
     height: 50
     cellSize: 1
     origin: {x: 0, y: 0}
-  roomCount: 10
+  roomCount: 20
   roomSizeMin: {x: 3, y: 3}
   roomSizeMax: {x: 5, y: 5}
-  useSeed: 1
-  seed: 1789961284
+  allowRoomOverlap: 1
+  maxAttemptsPerRoom: 50
+  overlapPadding: 0
+  useSeed: 0
+  seed: 198370462
 --- !u!4 &707203236
 Transform:
   m_ObjectHideFlags: 0
