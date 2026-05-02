@@ -227,6 +227,7 @@ GameObject:
   - component: {fileID: 707203236}
   - component: {fileID: 707203235}
   - component: {fileID: 707203234}
+  - component: {fileID: 707203237}
   m_Layer: 0
   m_Name: GameObject
   m_TagString: Untagged
@@ -247,6 +248,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   drawCells: 1
+  drawRoomTypeNodes: 1
+  roomNodeSize: 0.5
 --- !u!114 &707203235
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -267,11 +270,24 @@ MonoBehaviour:
   roomCount: 20
   roomSizeMin: {x: 3, y: 3}
   roomSizeMax: {x: 5, y: 5}
-  allowRoomOverlap: 1
+  allowRoomOverlap: 0
   maxAttemptsPerRoom: 50
   overlapPadding: 0
+  bossRoomCount: 1
+  mobRoomCount: 3
+  treasureRoomCount: 1
+  bossMinDepth: 3
+  mobMinDepth: 2
+  treasureMinDepth: 1
+  dungeonParent: {fileID: 707203236}
+  floorPrefab: {fileID: 2233635800329010496, guid: 07703effeb6e2aa4c9424f9a01c8e503, type: 3}
+  wallPrefab: {fileID: 3901205255127509964, guid: 961678247667d6645ac888330d40e3b1, type: 3}
+  wallHeight: 1
+  playerPrefab: {fileID: 3412160753495706193, guid: c8d78158c028ecf49beb6610e4b3952d, type: 3}
+  playerInstance: {fileID: 0}
+  playerSpawnHeight: -1
   useSeed: 0
-  seed: 198370462
+  seed: 172418465
 --- !u!4 &707203236
 Transform:
   m_ObjectHideFlags: 0
@@ -287,6 +303,18 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &707203237
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 707203233}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7823b5544667c0447ab94cca10f030a2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &963194225
 GameObject:
   m_ObjectHideFlags: 0
@@ -300,7 +328,7 @@ GameObject:
   - component: {fileID: 963194226}
   m_Layer: 0
   m_Name: Main Camera
-  m_TagString: MainCamera
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0

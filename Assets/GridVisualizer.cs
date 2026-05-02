@@ -4,6 +4,9 @@ public class GridVisualizer : MonoBehaviour
 {
     private DungeonGenerator generator;
     [SerializeField] private bool drawCells = false;
+    [SerializeField] private bool drawRoomTypeNodes = false;
+    [SerializeField] private float roomNodeSize = 0.5f;
+
 
     private void Awake()
     {
@@ -73,5 +76,44 @@ public class GridVisualizer : MonoBehaviour
                 Vector3 center = origin + new Vector3((x + 0.5f) * s, 0f, (y + 0.5f) * s);
                 Gizmos.DrawCube(center, new Vector3(s, 0.01f, s));
             }
+        
+        if (!drawRoomTypeNodes) return;
+
+        foreach (RoomNode room in generator.Rooms)
+        {
+            Gizmos.color = GetRoomTypeColor(room.Type);
+
+            Vector3 center = origin + new Vector3(
+                (room.Center.x + 0.5f) * s,
+                0.05f,
+                (room.Center.y + 0.5f) * s
+            );
+
+            Gizmos.DrawCube(center, new Vector3(s * roomNodeSize, 0.08f, s * roomNodeSize));
+        }
+    }
+    private Color GetRoomTypeColor(RoomType type)
+    {
+        switch (type)
+        {
+            case RoomType.Start:
+                return Color.cyan;
+
+            case RoomType.Boss:
+                return Color.red;
+
+            case RoomType.Mob:
+                return Color.magenta;
+
+            case RoomType.Treasure:
+                return new Color(1f, 0.5f, 0f, 1f); // orange
+
+            case RoomType.End:
+                return Color.black;
+
+            case RoomType.Normal:
+            default:
+                return Color.white;
+        }
     }
 }

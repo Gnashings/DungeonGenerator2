@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using BaseGraph;
 
 [Serializable]
 public class GridSettings
@@ -15,6 +16,27 @@ public class GridSettings
     public Vector2 origin = Vector2.zero;
 }
 
+//selectors for various rooms
+public enum RoomType
+{
+    Normal,
+    Start,
+    End,
+    Boss,
+    Mob,
+    Treasure
+}
+
+//room node information, not to be placed in BaseGraph due to context changes.
+public class RoomNode
+{
+    public int Id;
+    public Vector2Int Center;
+    public RectInt Bounds;
+    public int Depth = -1;
+    public RoomType Type = RoomType.Normal;
+}
+
 public class DungeonGenerator : MonoBehaviour
 {
 
@@ -23,7 +45,9 @@ public class DungeonGenerator : MonoBehaviour
     public GridSettings GridSettings => gridSettings;
     public DungeonGrid DungeonGrid { get; private set; }
 
-    private readonly List<Vector2Int> roomCenters = new List<Vector2Int>();
+    private readonly List<RoomNode> rooms = new List<RoomNode>();
+    public IReadOnlyList<RoomNode> Rooms => rooms;                           // exposed list for coloring only
+    private Graph<RoomNode> roomGraph = new Graph<RoomNode>();
 
     private void Awake()
     {
@@ -40,13 +64,34 @@ public class DungeonGenerator : MonoBehaviour
     [SerializeField] private int maxAttemptsPerRoom = 50;
     [SerializeField] private int overlapPadding = 0;
 
+    [Header("Room Type Spawn Rules")]
+    [SerializeField] int bossRoomCount = 1;
+    [SerializeField] int mobRoomCount = 3;
+    [SerializeField] int treasureRoomCount = 1;
+
+    [SerializeField] int bossMinDepth = 3;
+    [SerializeField] int mobMinDepth = 1;
+    [SerializeField] int treasureMinDepth = 1;
+
+    [Header("3D Prefabs")]
+    [SerializeField] private Transform dungeonParent;
+    [SerializeField] private GameObject floorPrefab;
+    [SerializeField] private GameObject wallPrefab;
+    [SerializeField] private float wallHeight = 2f;
+
+    [Header("Player Spawn")]
+    [SerializeField] private GameObject playerPrefab;
+    [SerializeField] private Transform playerInstance;
+    [SerializeField] private float playerSpawnHeight = 1f;
+
     [Header("Dungeon Seeding")]
     [SerializeField] private bool useSeed = false;
     [SerializeField] private int seed = 12345;
 
     private void Start()
     {
-        roomCenters.Clear();
+        rooms.Clear();
+        roomGraph = new Graph<RoomNode>();
         DungeonGrid.Clear(0);
 
         if (!useSeed)
@@ -57,12 +102,8 @@ public class DungeonGenerator : MonoBehaviour
         // Only instance of random for seed generation.
         System.Random rng = new System.Random(seed);
 
-        int placedRooms = 0;
-
         for (int i = 0; i < roomCount; i++)
         {
-            bool placed = false;
-
             for (int attempt = 0; attempt < maxAttemptsPerRoom; attempt++)
             {
                 int cx = rng.Next(0, DungeonGrid.Width);
@@ -71,29 +112,51 @@ public class DungeonGenerator : MonoBehaviour
                 int rw = rng.Next(roomSizeMin.x, roomSizeMax.x + 1);
                 int rh = rng.Next(roomSizeMin.y, roomSizeMax.y + 1);
 
-                // Bounds used ONLY for overlap checking (includes padding)
-                GetRoomExtents(cx, cy, rw, rh, overlapPadding, out int x0, out int x1, out int y0, out int y1);
+                // Used for overlap checking only
+                GetRoomExtents(cx, cy, rw, rh, overlapPadding, out int checkX0, out int checkX1, out int checkY0, out int checkY1);
+                // Used for actual carved room data
+                GetRoomExtents(cx, cy, rw, rh, 0, out int roomX0, out int roomX1, out int roomY0, out int roomY1);
 
-                if (!allowRoomOverlap && !CanPlaceRoom(x0, x1, y0, y1))
+                if (!allowRoomOverlap && !CanPlaceRoom(checkX0, checkX1, checkY0, checkY1))
                     continue;
 
-                // Carve actual room without padding
                 CarveRoomCentered(cx, cy, rw, rh);
-                roomCenters.Add(new Vector2Int(cx, cy));
 
-                placed = true;
-                placedRooms++;
+                RoomNode room = new RoomNode
+                {
+                    Id = rooms.Count,
+                    Center = new Vector2Int(cx, cy),
+                    Bounds = new RectInt(roomX0, roomY0, (roomX1 - roomX0) + 1, (roomY1 - roomY0) + 1),
+                    Depth = -1,
+                    Type = RoomType.Normal
+                };
+
+                rooms.Add(room);
+                roomGraph.AddNode(room);
+
                 break;
             }
-
-            // If it fails, skip it. This prevents infinite loops.
         }
 
-        if (roomCenters.Count >= 2)
+        if (rooms.Count >= 2)
+        {
             ConnectRoomsMST();
+            ComputeRoomDepths(rooms[0]);
+            AssignRoomTypes(rng);
+            SpawnPlayerAtStartRoom();
+            SpawnDungeon3D();
 
+
+            /*
+            foreach (RoomNode room in rooms)
+            {
+                Debug.Log($"Room {room.Id} | Depth: {room.Depth} | Type: {room.Type} | Center: {room.Center}");
+            }
+            */
+        }
     }
 
+    //carves a room out from the center tile
     private void CarveRoomCentered(int cx, int cy, int w, int h)
     {
         int halfW = w / 2;
@@ -141,7 +204,7 @@ public class DungeonGenerator : MonoBehaviour
     // Prim implimentation
     private void ConnectRoomsMST()
     {
-        int n = roomCenters.Count;
+        int n = rooms.Count;
         if (n < 2) return;
 
         bool[] inTree = new bool[n];
@@ -160,7 +223,7 @@ public class DungeonGenerator : MonoBehaviour
         // Initialize costs from node 0
         for (int i = 1; i < n; i++)
         {
-            minCost[i] = DistSq(roomCenters[0], roomCenters[i]);
+            minCost[i] = DistSq(rooms[0].Center, rooms[i].Center);
             parent[i] = 0;
         }
 
@@ -195,7 +258,9 @@ public class DungeonGenerator : MonoBehaviour
             if (!carvedEdges.Contains((lo, hi)))
             {
                 carvedEdges.Add((lo, hi));
-                CarveCorridorL(roomCenters[a], roomCenters[b]);
+
+                roomGraph.AddEdge(rooms[a], rooms[b]);
+                CarveCorridorL(rooms[a].Center, rooms[b].Center);
             }
 
             inTree[next] = true;
@@ -205,7 +270,7 @@ public class DungeonGenerator : MonoBehaviour
             {
                 if (inTree[j]) continue;
 
-                int cost = DistSq(roomCenters[next], roomCenters[j]);
+                int cost = DistSq(rooms[next].Center, rooms[j].Center);
                 if (cost < minCost[j])
                 {
                     minCost[j] = cost;
@@ -213,6 +278,156 @@ public class DungeonGenerator : MonoBehaviour
                 }
             }
         }
+    }
+
+    private void ComputeRoomDepths(RoomNode startRoom)
+    {
+        foreach (RoomNode room in rooms)
+        {
+            room.Depth = -1;
+            room.Type = RoomType.Normal;
+        }
+
+        if (startRoom == null) return;
+
+        Queue<RoomNode> queue = new Queue<RoomNode>();
+
+        startRoom.Depth = 0;
+        startRoom.Type = RoomType.Start;
+        queue.Enqueue(startRoom);
+
+        while (queue.Count > 0)
+        {
+            RoomNode current = queue.Dequeue();
+
+            foreach (RoomNode neighbor in roomGraph.GetNeighbors(current))
+            {
+                if (neighbor.Depth != -1) continue;
+
+                neighbor.Depth = current.Depth + 1;
+                queue.Enqueue(neighbor);
+            }
+        }
+    }
+
+    //Ensures all generations are created with a start, end, and speciality rooms for entity spawning.
+    private void AssignRoomTypes(System.Random rng)
+    {
+        if (rooms.Count == 0) return;
+
+        foreach (RoomNode room in rooms)
+        {
+            room.Type = RoomType.Normal;
+        }
+
+        RoomNode startRoom = rooms[0];
+        startRoom.Type = RoomType.Start;
+
+        RoomNode endRoom = GetDeepestRoomExcluding(startRoom);
+        if (endRoom != null)
+        {
+            endRoom.Type = RoomType.End;
+        }
+
+        AssignMultipleRoomsOfType(
+            rng,
+            RoomType.Boss,
+            bossRoomCount,
+            bossMinDepth,
+            startRoom,
+            endRoom
+        );
+
+        AssignMultipleRoomsOfType(
+            rng,
+            RoomType.Treasure,
+            treasureRoomCount,
+            treasureMinDepth,
+            startRoom,
+            endRoom
+        );
+
+        AssignMultipleRoomsOfType(
+            rng,
+            RoomType.Mob,
+            mobRoomCount,
+            mobMinDepth,
+            startRoom,
+            endRoom
+        );
+    }
+    private void AssignMultipleRoomsOfType(
+    System.Random rng,
+    RoomType type,
+    int count,
+    int minDepth,
+    params RoomNode[] excludedRooms)
+    {
+        List<RoomNode> candidates = new List<RoomNode>();
+
+        foreach (RoomNode room in rooms)
+        {
+            if (room.Depth < minDepth) continue;
+            if (room.Type != RoomType.Normal) continue;
+            if (IsExcluded(room, excludedRooms)) continue;
+
+            candidates.Add(room);
+        }
+
+        for (int i = 0; i < count && candidates.Count > 0; i++)
+        {
+            int index = rng.Next(0, candidates.Count);
+            RoomNode chosenRoom = candidates[index];
+
+            chosenRoom.Type = type;
+            candidates.RemoveAt(index);
+        }
+    }
+
+    private RoomNode GetDeepestRoomExcluding(params RoomNode[] excludedRooms)
+    {
+        RoomNode deepest = null;
+
+        foreach (RoomNode room in rooms)
+        {
+            if (IsExcluded(room, excludedRooms)) continue;
+
+            if (deepest == null || room.Depth > deepest.Depth)
+            {
+                deepest = room;
+            }
+        }
+
+        return deepest;
+    }
+
+    private RoomNode GetRandomRoomAtMinDepth(System.Random rng, int minDepth, params RoomNode[] excludedRooms)
+    {
+        List<RoomNode> candidates = new List<RoomNode>();
+
+        foreach (RoomNode room in rooms)
+        {
+            if (room.Depth < minDepth) continue;
+            if (IsExcluded(room, excludedRooms)) continue;
+
+            candidates.Add(room);
+        }
+
+        if (candidates.Count == 0) return null;
+
+        int index = rng.Next(0, candidates.Count);
+        return candidates[index];
+    }
+
+    private bool IsExcluded(RoomNode room, params RoomNode[] excludedRooms)
+    {
+        foreach (RoomNode excluded in excludedRooms)
+        {
+            if (excluded == null) continue;
+            if (room == excluded) return true;
+        }
+
+        return false;
     }
 
     private int DistSq(Vector2Int a, Vector2Int b)
@@ -247,6 +462,82 @@ public class DungeonGenerator : MonoBehaviour
         if (DungeonGrid.InBounds(x, y)) DungeonGrid.Set(x, y, 1);
     }
 
+    private void SpawnDungeon3D()
+    {
+        if (dungeonParent != null)
+        {
+            for (int i = dungeonParent.childCount - 1; i >= 0; i--)
+            {
+                Destroy(dungeonParent.GetChild(i).gameObject);
+            }
+        }
+
+        for (int x = 0; x < DungeonGrid.Width; x++)
+            for (int y = 0; y < DungeonGrid.Height; y++)
+            {
+                if (DungeonGrid.GetCell(x, y) != 1) continue;
+
+                Vector3 floorPos = GridToWorld(x, y);
+                Instantiate(floorPrefab, floorPos, Quaternion.identity, dungeonParent);
+
+                TrySpawnWall(x + 1, y, floorPos + new Vector3(DungeonGrid.CellSize / 2f, wallHeight / 2f, 0f), Quaternion.Euler(0f, 90f, 0f));
+                TrySpawnWall(x - 1, y, floorPos + new Vector3(-DungeonGrid.CellSize / 2f, wallHeight / 2f, 0f), Quaternion.Euler(0f, 90f, 0f));
+                TrySpawnWall(x, y + 1, floorPos + new Vector3(0f, wallHeight / 2f, DungeonGrid.CellSize / 2f), Quaternion.identity);
+                TrySpawnWall(x, y - 1, floorPos + new Vector3(0f, wallHeight / 2f, -DungeonGrid.CellSize / 2f), Quaternion.identity);
+            }
+    }
+
+    private void TrySpawnWall(int neighborX, int neighborY, Vector3 wallPosition, Quaternion rotation)
+    {
+        if (DungeonGrid.InBounds(neighborX, neighborY) && DungeonGrid.GetCell(neighborX, neighborY) == 1)
+            return;
+
+        Instantiate(wallPrefab, wallPosition, rotation, dungeonParent);
+    }
+
+    private Vector3 GridToWorld(int x, int y)
+    {
+        return new Vector3(
+            DungeonGrid.Origin.x + (x + 0.5f) * DungeonGrid.CellSize,
+            0f,
+            DungeonGrid.Origin.y + (y + 0.5f) * DungeonGrid.CellSize
+        );
+    }
+
+    private void SpawnPlayerAtStartRoom()
+    {
+        RoomNode startRoom = null;
+
+        foreach (RoomNode room in rooms)
+        {
+            if (room.Type == RoomType.Start)
+            {
+                startRoom = room;
+                break;
+            }
+        }
+
+        if (startRoom == null)
+        {
+            Debug.LogWarning("No start room found. Cannot spawn player.");
+            return;
+        }
+
+        Vector3 spawnPosition = GridToWorld(startRoom.Center.x, startRoom.Center.y);
+        spawnPosition.y = playerSpawnHeight;
+
+        if (playerInstance != null)
+        {
+            playerInstance.position = spawnPosition;
+            return;
+        }
+
+        if (playerPrefab != null)
+        {
+            GameObject player = Instantiate(playerPrefab, spawnPosition, Quaternion.identity);
+            playerInstance = player.transform;
+        }
+    }
 }
 
 
